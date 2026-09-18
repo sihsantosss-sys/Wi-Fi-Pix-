@@ -8,6 +8,7 @@
         :root {
             --primary-color: #009ee3;
             --primary-hover: #007eb5;
+            --success-color: #28a745;
             --bg-color: #f4f7f6;
             --card-bg: #ffffff;
             --text-color: #333333;
@@ -104,7 +105,7 @@
         }
 
         #qr-code {
-            max-width: 200px;
+            max-width: 180px;
             height: auto;
             margin: 15px auto;
             display: block;
@@ -120,7 +121,7 @@
             border-radius: 6px;
             font-size: 0.8rem;
             word-break: break-all;
-            max-height: 80px;
+            max-height: 70px;
             overflow-y: auto;
             margin-top: 10px;
             color: #555;
@@ -128,7 +129,7 @@
         }
 
         .copy-btn {
-            background-color: #28a745;
+            background-color: var(--success-color);
             margin-top: 10px;
             font-size: 0.9rem;
             padding: 10px;
@@ -136,6 +137,28 @@
 
         .copy-btn:hover {
             background-color: #218838;
+        }
+
+        .status-loading {
+            margin-top: 15px;
+            font-size: 0.9rem;
+            color: #e67e22;
+            font-weight: 600;
+        }
+
+        .success-box {
+            display: none;
+            background-color: #d4edda;
+            color: #155724;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border: 1px solid #c3e6cb;
+        }
+
+        .success-box h2 {
+            font-size: 1.3rem;
+            margin-bottom: 8px;
         }
 
         @keyframes fadeIn {
@@ -171,13 +194,21 @@
         <div id="qr-container">
             <h3>Escaneie o QR Code</h3>
             <img id="qr-code" src="" alt="QR Code Pix">
-            <p style="font-size: 0.85rem; color: #666; margin-top: 10px;">Ou copie o código Pix abaixo:</p>
-            <div class="pix-copy-paste" id="pix-copia-cola"></div>
+            <p style="font-size: 0.85rem; color: #666;">Ou copie o código Pix abaixo:</p>
+            <div class="pix-copia-cola" id="pix-copia-cola"></div>
             <button class="copy-btn" id="btn-copy" onclick="copiarCodigo()">Copiar Código Pix</button>
+            <div class="status-loading" id="status-text">A aguardar confirmação do pagamento... 🔄</div>
+        </div>
+
+        <div class="success-box" id="success-box">
+            <h2>🎉 Pagamento Aprovado!</h2>
+            <p>O seu acesso à internet foi liberado com sucesso. Pode navegar livremente!</p>
         </div>
     </div>
 
     <script>
+        let intervalId = null;
+
         document.getElementById('payment-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -191,20 +222,20 @@
             try {
                 const response = await fetch('/criar-pix', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ valor, whatsapp })
                 });
 
                 const data = await response.json();
 
                 if (response.ok && data.qr_code_base64) {
-                    // Exibe o QR code em Base64 e o copia-e-cola
                     document.getElementById('qr-code').src = `data:image/png;base64,${data.qr_code_base64}`;
                     document.getElementById('pix-copia-cola').innerText = data.copia_e_cola;
+                    document.getElementById('payment-form').style.display = 'none';
                     document.getElementById('qr-container').style.display = 'block';
-                    btn.textContent = "Pix Gerado com Sucesso!";
+
+                    // Inicia a verificação automática (polling) a cada 4 segundos
+                    iniciarVerificacao(data.idPagamento);
                 } else {
                     alert('Erro ao gerar Pix: ' + (data.error || 'Tente novamente.'));
                     btn.textContent = "Gerar Pix de Pagamento";
@@ -223,6 +254,26 @@
             navigator.clipboard.writeText(texto).then(() => {
                 alert('Código Pix copiado com sucesso!');
             });
+        }
+
+        function iniciarVerificacao(paymentId) {
+            if (intervalId) clearInterval(intervalId);
+
+            intervalId = setInterval(async () => {
+                try {
+                    const response = await fetch(`/verificar-pagamento/${paymentId}`);
+                    const data = await response.json();
+
+                    if (data.status === 'approved') {
+                        clearInterval(intervalId);
+                        // Esconde o QR code e mostra a mensagem de sucesso
+                        document.getElementById('qr-container').style.display = 'none';
+                        document.getElementById('success-box').style.display = 'block';
+                    }
+                } catch (err) {
+                    console.error('Erro ao consultar status:', err);
+                }
+            }, 4000); // Consulta a cada 4 segundos
         }
     </script>
 </body>
