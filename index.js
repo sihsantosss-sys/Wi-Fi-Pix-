@@ -34,7 +34,8 @@ app.post('/criar-pix', async (req, res) => {
         }, {
             headers: {
                 'Authorization': `Bearer ${MP_ACCESS_TOKEN}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-Idempotency-Key': Date.now().toString() // Chave única para evitar duplicados exigida pelo Mercado Pago
             }
         });
 
