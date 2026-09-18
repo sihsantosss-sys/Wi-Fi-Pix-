@@ -4,22 +4,19 @@ const path = require('path');
 const app = express();
 
 app.use(express.json());
-// Para servir o index.html e ficheiros estáticos da pasta atual
 app.use(express.static(__dirname));
 
-// Utiliza variáveis de ambiente do Render ou valores de segurança
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN || 'SEU_ACCESS_TOKEN_DO_MERCADO_PAGO';
 const MIKROTIK_IP = process.env.MIKROTIK_IP || 'IP_OU_DNS_DO_SEU_MIKROTIK';
 const MIKROTIK_USER = process.env.MIKROTIK_USER || 'admin';
 const MIKROTIK_PASS = process.env.MIKROTIK_PASS || 'sua_senha';
 
-// Rota para servir o index.html explicitamente na raiz
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Rota para criar o Pix
 app.post('/criar-pix', async (req, res) => {
-    // Recebe o valor e o whatsapp/identificador vindos do formulário HTML
     const { valor, whatsapp } = req.body;
 
     try {
@@ -35,13 +32,12 @@ app.post('/criar-pix', async (req, res) => {
             headers: {
                 'Authorization': `Bearer ${MP_ACCESS_TOKEN}`,
                 'Content-Type': 'application/json',
-                'X-Idempotency-Key': Date.now().toString() // Chave única para evitar duplicados exigida pelo Mercado Pago
+                'X-Idempotency-Key': Date.now().toString()
             }
         });
 
         const paymentData = response.data;
         
-        // Devolve exatamente com os nomes que o index.html espera receber
         res.json({
             idPagamento: paymentData.id,
             qr_code_base64: paymentData.point_of_interaction.transaction_data.qr_code_base64,
@@ -54,25 +50,44 @@ app.post('/criar-pix', async (req, res) => {
     }
 });
 
+// NOVO: Rota para o frontend consultar o estado do pagamento periodicamente
+app.get('/verificar-pagamento/:id', async (req, res) => {
+    const paymentId = req.params.id;
+
+    try {
+        const response = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+            headers: { 'Authorization': `Bearer ${MP_ACCESS_TOKEN}` }
+        });
+
+        const status = response.data.status; // 'pending', 'approved', etc.
+        const clienteRef = response.data.external_reference;
+
+        if (status === 'approved') {
+            console.log(`Pagamento ${paymentId} aprovado via Polling! Liberando cliente: ${clienteRef}`);
+            await liberarClienteNoMikroTik(clienteRef);
+        }
+
+        res.json({ status });
+    } catch (error) {
+        console.error('Erro ao verificar pagamento:', error.response?.data || error.message);
+        res.status(500).json({ error: 'Erro ao consultar pagamento' });
+    }
+});
+
 app.post('/webhook-pagamento', async (req, res) => {
     const evento = req.body;
-
     if (evento.type === 'payment') {
         const paymentId = evento.data.id;
-
         try {
             const response = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
                 headers: { 'Authorization': `Bearer ${MP_ACCESS_TOKEN}` }
             });
-
             const pagamento = response.data;
-
             if (pagamento.status === 'approved') {
                 const clienteRef = pagamento.external_reference;
-                console.log(`Pagamento aprovado! Liberando referência: ${clienteRef}`);
+                console.log(`Pagamento aprovado via Webhook! Liberando: ${clienteRef}`);
                 await liberarClienteNoMikroTik(clienteRef);
             }
-
             res.sendStatus(200);
         } catch (error) {
             console.error('Erro ao processar webhook:', error.message);
